@@ -58,6 +58,10 @@ func main() {
 				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
 				mcp.DefaultString("es"),
 			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "List Chapters",
+				ReadOnlyHint: mcp.ToBoolPtr(true),
+			}),
 		),
 		handleListChapters,
 	)
@@ -77,6 +81,10 @@ func main() {
 				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
 				mcp.DefaultString("es"),
 			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "Read Chapter",
+				ReadOnlyHint: mcp.ToBoolPtr(true),
+			}),
 		),
 		handleReadChapter,
 	)
@@ -93,6 +101,10 @@ func main() {
 				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
 				mcp.DefaultString("es"),
 			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "Search Book",
+				ReadOnlyHint: mcp.ToBoolPtr(true),
+			}),
 		),
 		handleSearchBook,
 	)
@@ -105,6 +117,10 @@ func main() {
 				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
 				mcp.DefaultString("es"),
 			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "Get Book Index",
+				ReadOnlyHint: mcp.ToBoolPtr(true),
+			}),
 		),
 		handleGetBookIndex,
 	)
@@ -128,6 +144,10 @@ func main() {
 			mcp.WithNumber("top_k",
 				mcp.Description("Number of results to return (default: 5)"),
 			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "Semantic Search",
+				ReadOnlyHint: mcp.ToBoolPtr(true),
+			}),
 		),
 		handleSemanticSearch,
 	)
@@ -140,6 +160,10 @@ func main() {
 				mcp.Description("Language locale to index: 'es', 'en', or 'all'"),
 				mcp.DefaultString("all"),
 			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:           "Build Semantic Index",
+				DestructiveHint: mcp.ToBoolPtr(true),
+			}),
 		),
 		handleBuildSemanticIndex,
 	)
@@ -148,6 +172,10 @@ func main() {
 	s.AddTool(
 		mcp.NewTool("semantic_status",
 			mcp.WithDescription("Check the status of the semantic search engine (availability, index status, chunk count)."),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "Semantic Status",
+				ReadOnlyHint: mcp.ToBoolPtr(true),
+			}),
 		),
 		handleSemanticStatus,
 	)
