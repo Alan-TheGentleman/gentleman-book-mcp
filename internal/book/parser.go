@@ -75,10 +75,15 @@ func (p *Parser) parseFrontmatter(content string) (*frontmatter, string, error) 
 	// Parse frontmatter manually (it's YAML-like but with JSON arrays)
 	fm := &frontmatter{}
 
-	// Extract id
-	idMatch := regexp.MustCompile(`id:\s*['"]([^'"]+)['"]`).FindStringSubmatch(fmContent)
+	// Extract id (supports both quoted and unquoted values)
+	idRegex := regexp.MustCompile(`id:\s*(?:['"]([^'"]+)['"]|([^\s'"]+))`)
+	idMatch := idRegex.FindStringSubmatch(fmContent)
 	if len(idMatch) > 1 {
-		fm.ID = idMatch[1]
+		if idMatch[1] != "" {
+			fm.ID = idMatch[1] // quoted value
+		} else if len(idMatch) > 2 {
+			fm.ID = idMatch[2] // unquoted value
+		}
 	}
 
 	// Extract order
@@ -87,10 +92,16 @@ func (p *Parser) parseFrontmatter(content string) (*frontmatter, string, error) 
 		fm.Order, _ = strconv.Atoi(orderMatch[1])
 	}
 
-	// Extract name
-	nameMatch := regexp.MustCompile(`name:\s*['"]([^'"]+)['"]`).FindStringSubmatch(fmContent)
+	// Extract name (supports both quoted and unquoted values)
+	// For unquoted, capture until end of line
+	nameRegex := regexp.MustCompile(`(?m)^name:\s*(?:['"]([^'"]+)['"]|([^\n]+))`)
+	nameMatch := nameRegex.FindStringSubmatch(fmContent)
 	if len(nameMatch) > 1 {
-		fm.Name = nameMatch[1]
+		if nameMatch[1] != "" {
+			fm.Name = nameMatch[1] // quoted value
+		} else if len(nameMatch) > 2 {
+			fm.Name = strings.TrimSpace(nameMatch[2]) // unquoted value
+		}
 	}
 
 	// Extract titleList (it's a JSON-like array)
