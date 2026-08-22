@@ -17,6 +17,52 @@ import (
 
 var parser *book.Parser
 var semanticEngine *embeddings.SemanticEngine
+var availableLocales []string
+
+// localeParam builds the standard locale tool parameter with an Enum of the discovered locales.
+func localeParam(def string) mcp.ToolOption {
+	return mcp.WithString("locale",
+		mcp.Description("Language locale of the book content"),
+		mcp.Enum(availableLocales...),
+		mcp.DefaultString(def),
+	)
+}
+
+// validateLocale returns nil if locale is a discovered locale or "all".
+func validateLocale(locale string) error {
+	for _, l := range availableLocales {
+		if l == locale {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown locale %q; valid locales: %s", locale, strings.Join(availableLocales, ", "))
+}
+
+// extractLocaleFromURI pulls the locale segment out of a resource URI like book://index/{locale}.
+func extractLocaleFromURI(uri string) string {
+	parts := strings.Split(strings.TrimSuffix(uri, "/"), "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return ""
+}
+
+// expandAllLocales expands "all" to every discovered locale; any other value passes through.
+func expandAllLocales(localeParam string) []string {
+	if localeParam == "all" {
+		return availableLocales
+	}
+	return []string{localeParam}
+}
+
+// localeFromRequest extracts and validates the locale param of a tool request.
+func localeFromRequest(req mcp.CallToolRequest, def string) (string, error) {
+	locale := req.GetString("locale", def)
+	if err := validateLocale(locale); err != nil {
+		return "", err
+	}
+	return locale, nil
+}
 
 func main() {
 	// Get book path from environment variable or use default
@@ -33,6 +79,14 @@ func main() {
 	}
 
 	parser = book.NewParser(bookPath)
+
+	// Discover available locales once at startup
+	locales, err := parser.GetAvailableLocales()
+	if err != nil {
+		log.Fatalf("Error discovering locales (check BOOK_PATH): %v", err)
+	}
+	availableLocales = locales
+	log.Printf("Discovered locales: %v", availableLocales)
 
 	// Initialize semantic engine if OpenAI API key or Ollama is available
 	initSemanticEngine()
@@ -54,10 +108,7 @@ func main() {
 	s.AddTool(
 		mcp.NewTool("list_chapters",
 			mcp.WithDescription("List all chapters in the Gentleman Programming Book. Returns chapter metadata including ID, name, order, and sections."),
-			mcp.WithString("locale",
-				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
-				mcp.DefaultString("es"),
-			),
+			localeParam("es"),
 		),
 		handleListChapters,
 	)
@@ -73,10 +124,7 @@ func main() {
 			mcp.WithString("section_id",
 				mcp.Description("Optional section tag ID to read only that section"),
 			),
-			mcp.WithString("locale",
-				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
-				mcp.DefaultString("es"),
-			),
+			localeParam("es"),
 		),
 		handleReadChapter,
 	)
@@ -89,10 +137,7 @@ func main() {
 				mcp.Required(),
 				mcp.Description("Search query (keywords to find in the book)"),
 			),
-			mcp.WithString("locale",
-				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
-				mcp.DefaultString("es"),
-			),
+			localeParam("es"),
 		),
 		handleSearchBook,
 	)
@@ -101,10 +146,7 @@ func main() {
 	s.AddTool(
 		mcp.NewTool("get_book_index",
 			mcp.WithDescription("Get the complete table of contents for the book, including all chapters and their sections."),
-			mcp.WithString("locale",
-				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
-				mcp.DefaultString("es"),
-			),
+			localeParam("es"),
 		),
 		handleGetBookIndex,
 	)
@@ -121,10 +163,7 @@ func main() {
 				mcp.Required(),
 				mcp.Description("Natural language query to search for"),
 			),
-			mcp.WithString("locale",
-				mcp.Description("Language locale: 'es' for Spanish, 'en' for English"),
-				mcp.DefaultString("es"),
-			),
+			localeParam("es"),
 			mcp.WithNumber("top_k",
 				mcp.Description("Number of results to return (default: 5)"),
 			),
@@ -137,7 +176,8 @@ func main() {
 		mcp.NewTool("build_semantic_index",
 			mcp.WithDescription("Build or rebuild the semantic search index. Required before using semantic_search. Takes a few minutes."),
 			mcp.WithString("locale",
-				mcp.Description("Language locale to index: 'es', 'en', or 'all'"),
+				mcp.Description("Locale to index, or \"all\" for every discovered locale"),
+				mcp.Enum(append([]string{"all"}, availableLocales...)...),
 				mcp.DefaultString("all"),
 			),
 		),
@@ -156,23 +196,29 @@ func main() {
 	// LEVEL 2: DYNAMIC RESOURCES
 	// ============================================
 
-	// Resource: Book index
-	s.AddResource(
-		mcp.NewResource(
-			"book://index/es",
-			"Book Index (Spanish)",
-			mcp.WithResourceDescription("Complete table of contents for the Spanish version"),
-			mcp.WithMIMEType("application/json"),
-		),
-		handleBookIndexResource,
-	)
+	// Static resources: one per discovered locale, so resources/list enumerates them
+	for _, loc := range availableLocales {
+		loc := loc // capture for closure
+		s.AddResource(
+			mcp.NewResource(
+				fmt.Sprintf("book://index/%s", loc),
+				fmt.Sprintf("Book Index (%s)", loc),
+				mcp.WithResourceDescription("Complete table of contents for the "+loc+" locale"),
+				mcp.WithMIMEType("application/json"),
+			),
+			func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+				return handleBookIndexResource(ctx, req)
+			},
+		)
+	}
 
-	s.AddResource(
-		mcp.NewResource(
-			"book://index/en",
-			"Book Index (English)",
-			mcp.WithResourceDescription("Complete table of contents for the English version"),
-			mcp.WithMIMEType("application/json"),
+	// Resource template: Book index for any locale (covers non-enumerated reads)
+	s.AddResourceTemplate(
+		mcp.NewResourceTemplate(
+			"book://index/{locale}",
+			"Book Index",
+			mcp.WithTemplateDescription("Complete table of contents for the given locale"),
+			mcp.WithTemplateMIMEType("application/json"),
 		),
 		handleBookIndexResource,
 	)
@@ -205,6 +251,9 @@ func main() {
 			mcp.WithArgument("pattern_b",
 				mcp.ArgumentDescription("Second pattern to compare"),
 			),
+			mcp.WithArgument("locale",
+				mcp.ArgumentDescription(fmt.Sprintf("Language locale (default 'es'; available: %s)", strings.Join(availableLocales, ", "))),
+			),
 		),
 		handleComparePatternsPrompt,
 	)
@@ -235,7 +284,10 @@ func main() {
 // ============================================
 
 func handleListChapters(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	locale := req.GetString("locale", "es")
+	locale, lerr := localeFromRequest(req, "es")
+	if lerr != nil {
+		return mcp.NewToolResultError(lerr.Error()), nil
+	}
 
 	chapters, err := parser.ListChapters(locale)
 	if err != nil {
@@ -267,7 +319,10 @@ func handleListChapters(ctx context.Context, req mcp.CallToolRequest) (*mcp.Call
 func handleReadChapter(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	chapterID := req.GetString("chapter_id", "")
 	sectionID := req.GetString("section_id", "")
-	locale := req.GetString("locale", "es")
+	locale, lerr := localeFromRequest(req, "es")
+	if lerr != nil {
+		return mcp.NewToolResultError(lerr.Error()), nil
+	}
 
 	if chapterID == "" {
 		return mcp.NewToolResultError("chapter_id is required"), nil
@@ -295,7 +350,10 @@ func handleReadChapter(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 
 func handleSearchBook(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query := req.GetString("query", "")
-	locale := req.GetString("locale", "es")
+	locale, lerr := localeFromRequest(req, "es")
+	if lerr != nil {
+		return mcp.NewToolResultError(lerr.Error()), nil
+	}
 
 	if query == "" {
 		return mcp.NewToolResultError("query is required"), nil
@@ -315,7 +373,10 @@ func handleSearchBook(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 }
 
 func handleGetBookIndex(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	locale := req.GetString("locale", "es")
+	locale, lerr := localeFromRequest(req, "es")
+	if lerr != nil {
+		return mcp.NewToolResultError(lerr.Error()), nil
+	}
 
 	index, err := parser.GetBookIndex(locale)
 	if err != nil {
@@ -334,9 +395,9 @@ func handleBookIndexResource(ctx context.Context, req mcp.ReadResourceRequest) (
 	uri := req.Params.URI
 
 	// Extract locale from URI
-	locale := "es"
-	if strings.HasSuffix(uri, "/en") {
-		locale = "en"
+	locale := extractLocaleFromURI(uri)
+	if err := validateLocale(locale); err != nil {
+		return nil, fmt.Errorf("invalid locale in URI %q: %w", uri, err)
 	}
 
 	index, err := parser.GetBookIndex(locale)
@@ -409,6 +470,7 @@ Please provide a clear and comprehensive explanation based on this content.`, co
 func handleComparePatternsPrompt(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	patternA := "clean architecture"
 	patternB := "hexagonal architecture"
+	locale := "es"
 
 	if args := req.Params.Arguments; args != nil {
 		if a := args["pattern_a"]; a != "" {
@@ -417,11 +479,23 @@ func handleComparePatternsPrompt(ctx context.Context, req mcp.GetPromptRequest) 
 		if b := args["pattern_b"]; b != "" {
 			patternB = b
 		}
+		if l := args["locale"]; l != "" {
+			if err := validateLocale(l); err != nil {
+				return nil, err
+			}
+			locale = l
+		}
 	}
 
 	// Search content for both patterns
-	resultsA, _ := parser.Search(patternA, "es")
-	resultsB, _ := parser.Search(patternB, "es")
+	resultsA, errA := parser.Search(patternA, locale)
+	if errA != nil {
+		return nil, errA
+	}
+	resultsB, errB := parser.Search(patternB, locale)
+	if errB != nil {
+		return nil, errB
+	}
 
 	var contextA, contextB string
 	if len(resultsA) > 0 {
@@ -574,7 +648,10 @@ func handleSemanticSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	}
 
 	query := req.GetString("query", "")
-	locale := req.GetString("locale", "es")
+	locale, lerr := localeFromRequest(req, "es")
+	if lerr != nil {
+		return mcp.NewToolResultError(lerr.Error()), nil
+	}
 	topK := req.GetInt("top_k", 5)
 
 	if query == "" {
@@ -599,14 +676,13 @@ func handleBuildSemanticIndex(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError("Semantic search not available. Set OPENAI_API_KEY or ensure Ollama is running."), nil
 	}
 
-	localeParam := req.GetString("locale", "all")
-
-	var locales []string
-	if localeParam == "all" {
-		locales = []string{"es", "en"}
-	} else {
-		locales = []string{localeParam}
+	localeArg, lerr := localeFromRequest(req, "all")
+	if lerr != nil {
+		return mcp.NewToolResultError(lerr.Error()), nil
 	}
+	localeParam := localeArg
+
+	locales := expandAllLocales(localeParam)
 
 	var allChunks []embeddings.Chunk
 	chunkID := 0

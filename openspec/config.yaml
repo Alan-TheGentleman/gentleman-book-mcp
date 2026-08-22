@@ -1,0 +1,54 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Go 1.25.1, mark3labs/mcp-go v0.43.2 (MCP server over stdio)
+  Architecture: cmd/server/main.go (entry, tool registration), internal/book (MDX parser + models),
+    internal/embeddings (semantic search via OpenAI/Ollama; book content embedded from
+    /Users/braingram/work/gentleman-programming-book)
+  Testing: go test built-in; no *_test.go yet
+  Style: standard Go layout, MIT, bilingual READMEs (en/es)
+  Known issue: installed binary hardcodes locales 'es'/'en'; book repo now has 5 locale dirs
+    (en, es, ai-agent, harness, secret-knowledge) — list_books sees all 5 but
+    list_chapters/read_chapter/search only serve es/en.
+  Companion repo: gentleman-programming-book (Engram project used for this MCP's memories).
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns (Go stdlib layout, mcp-go server patterns)
+    tdd: true
+    test_command: "go test ./..."
+  verify:
+    test_command: "go test ./..."
+    build_command: "go build ./..."
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+testing:
+  strict_tdd: true
+  detected: "2026-08-22"
+  test_runner:
+    command: "go test ./..."
+    framework: go testing (stdlib)
+  layers:
+    unit: true
+    integration: false   # httptest possible but none present yet
+    e2e: false
+  coverage:
+    available: true
+    command: "go test -cover ./..."
+  quality:
+    linter: false        # golangci-lint not installed
+    type_checker: true   # go vet / compiler
+    formatter: true      # gofmt

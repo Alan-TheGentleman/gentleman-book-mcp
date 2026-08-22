@@ -370,10 +370,17 @@ func (p *Parser) GetAvailableLocales() ([]string, error) {
 
 	var locales []string
 	for _, entry := range entries {
-		if entry.IsDir() && (entry.Name() == "en" || entry.Name() == "es") {
-			locales = append(locales, entry.Name())
+		name := entry.Name()
+		if !entry.IsDir() || strings.HasPrefix(name, ".") {
+			continue
 		}
+		mdx, err := filepath.Glob(filepath.Join(p.bookPath, name, "*.mdx"))
+		if err != nil || len(mdx) == 0 {
+			continue
+		}
+		locales = append(locales, name)
 	}
 
+	sort.Strings(locales)
 	return locales, nil
 }
